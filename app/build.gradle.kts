@@ -1,5 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -32,34 +34,55 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+    kotlinOptions {
+        jvmTarget = "11"
+    }
 
     // Performance optimization
     buildFeatures {
         buildConfig = true
     }
+
+    // 16KB Page Size Compatibility (required for WebRTC native libs)
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 dependencies {
-    implementation ("com.google.android.material:material:1.13.0")
-    implementation ("androidx.appcompat:appcompat:1.7.1")
-    implementation ("androidx.constraintlayout:constraintlayout:2.2.1")
-    implementation ("androidx.recyclerview:recyclerview:1.4.0")
-    implementation ("com.google.android.material:material:1.13.0")
-    implementation ("androidx.preference:preference:1.2.1")
-    implementation (libs.appcompat.v161)
-    implementation (libs.core.ktx)
-    implementation (libs.recyclerview.v132)
-    implementation (libs.material.v1110)
-    implementation (libs.androidx.activity.ktx)
-    implementation (libs.androidx.constraintlayout.v214)
-    implementation (libs.play.services.location)
-    testImplementation (libs.junit)
-    androidTestImplementation (libs.androidx.junit.v115)
-    androidTestImplementation (libs.androidx.espresso.core.v351)
-    implementation (libs.stream.webrtc.android.v104)
-    implementation (libs.cardview)
-    implementation (libs.preference)
-    implementation (libs.okhttp)
-    implementation (libs.socket.io.client)
-    implementation (libs.work.runtime)
+    implementation("com.google.android.material:material:1.13.0")
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.preference:preference:1.2.1")
+    implementation(libs.appcompat.v161)
+    implementation(libs.core.ktx)
+    implementation(libs.recyclerview.v132)
+    implementation(libs.material.v1110)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.constraintlayout.v214)
+    implementation(libs.play.services.location)
+
+    // Firebase (BOM manages all Firebase library versions)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging.ktx)
+    implementation(libs.firebase.analytics)
+
+    // WebRTC & Socket.IO
+    implementation(libs.stream.webrtc.android.v104)
+    implementation(libs.socket.io.client)
+
+    // WorkManager (kept as FCM fallback)
+    implementation(libs.work.runtime)
+
+    // Networking
+    implementation(libs.okhttp)
+    implementation(libs.cardview)
+    implementation(libs.preference)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit.v115)
+    androidTestImplementation(libs.androidx.espresso.core.v351)
 }
